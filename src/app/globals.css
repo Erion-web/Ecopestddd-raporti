@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --green: #04442F;
+  --green-light: #055a3e;
+  --green-pale: #e6f0ec;
+  --yellow: #8BC53F;
+  --yellow-hover: #7ab033;
+  --red: #c0392b;
+}
+
+* { box-sizing: border-box; }
+
+body { font-family: 'DM Sans', sans-serif; }
+
+@layer components {
+  .btn-primary {
+    @apply bg-green text-white font-bold px-6 py-3 rounded-xl hover:bg-green-light transition-all hover:-translate-y-0.5 hover:shadow-lg cursor-pointer border-none;
+  }
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-600 font-bold px-6 py-3 rounded-xl hover:bg-gray-200 transition-all cursor-pointer border-none;
+  }
+  .btn-yellow {
+    @apply bg-[#8BC53F] text-white font-bold px-6 py-3 rounded-xl hover:bg-[#7ab033] transition-all cursor-pointer border-none;
+  }
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-gray-100;
+  }
+  .input {
+    @apply w-full border-2 border-gray-200 rounded-lg px-3 py-2.5 text-sm font-medium
+           focus:outline-none focus:border-green focus:ring-2 focus:ring-green/10
+           transition-all placeholder:text-gray-400;
+  }
+  .label {
+    @apply text-xs font-bold text-gray-500 uppercase tracking-wide mb-1 block;
+  }
+  .section-header {
+    @apply bg-green text-white text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-t-lg;
+  }
+}

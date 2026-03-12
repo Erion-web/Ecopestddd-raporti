@@ -2,7 +2,7 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Product, Technician } from "@/types";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const SANITARY_ITEMS = [
   "Kontejnerët e mbeturinave me kapak",
@@ -52,6 +52,18 @@ const ZONES = {
   ],
 };
 
+// Commonly used products — pill shortcuts
+const COMMON_PRODUCTS = [
+  "Solfac EW 50",
+  "K-Othrine SC 25",
+  "Cislin 10 EC",
+  "Actellic 50 EC",
+  "Ratimor Pasta",
+  "Klerat Pellets",
+  "Incidin Plus",
+  "Menno Florades",
+];
+
 interface Props {
   technician: Technician | null;
 }
@@ -62,11 +74,11 @@ export default function CertificateForm({ technician }: Props) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
-  // Form state — data dhe ora vendosen automatikisht
   const now = new Date();
   const autoDate = now.toISOString().split("T")[0];
-  const autoTime = now.toTimeString().slice(0, 5); // HH:MM
+  const autoTime = now.toTimeString().slice(0, 5);
 
   const [data, setData] = useState({
     service_date: autoDate,
@@ -79,7 +91,7 @@ export default function CertificateForm({ technician }: Props) {
     service_types: [] as string[],
     pest_types: [] as string[],
     pest_other: "",
-    products: [{ emri: "", doza: "" }] as Product[],
+    products: [] as Product[],
     zones_green: [] as string[],
     zones_yellow: [] as string[],
     zones_red: [] as string[],
@@ -87,12 +99,49 @@ export default function CertificateForm({ technician }: Props) {
       SANITARY_ITEMS.map((i) => [i, null])
     ) as Record<string, "po" | "jo" | null>,
     notes: "",
+    photoFiles: [] as File[],
+    photoPreviewUrls: [] as string[],
   });
 
   const toggle = (arr: string[], val: string): string[] =>
     arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val];
 
-  const steps = ["Klienti", "Shërbimi", "Zonat", "Sanitaria", "Konfirmo"];
+  // Toggle a common product in the products list
+  const toggleCommonProduct = (name: string) => {
+    setData((d) => {
+      const exists = d.products.some((p) => p.emri === name);
+      if (exists) {
+        return { ...d, products: d.products.filter((p) => p.emri !== name) };
+      }
+      return { ...d, products: [...d.products, { emri: name, doza: "" }] };
+    });
+  };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const previews = files.map((f) => URL.createObjectURL(f));
+    setData((d) => ({
+      ...d,
+      photoFiles: [...d.photoFiles, ...files],
+      photoPreviewUrls: [...d.photoPreviewUrls, ...previews],
+    }));
+    // Reset input so same file can be re-selected
+    if (photoInputRef.current) photoInputRef.current.value = "";
+  };
+
+  const removePhoto = (idx: number) => {
+    setData((d) => {
+      URL.revokeObjectURL(d.photoPreviewUrls[idx]);
+      return {
+        ...d,
+        photoFiles: d.photoFiles.filter((_, i) => i !== idx),
+        photoPreviewUrls: d.photoPreviewUrls.filter((_, i) => i !== idx),
+      };
+    });
+  };
+
+  const steps = ["Klienti", "Shërbimi", "Zonat", "Sanitaria", "Foto & Konfirmo"];
 
   const save = async (status: "draft" | "sent" = "draft") => {
     setSaving(true);
@@ -124,6 +173,7 @@ export default function CertificateForm({ technician }: Props) {
           techName = user.email || "Teknik";
         }
       }
+
       const { data: cert, error: err } = await supabase
         .from("certificates")
         .insert({
@@ -145,11 +195,36 @@ export default function CertificateForm({ technician }: Props) {
           sanitary_report: data.sanitary_report,
           notes: data.notes || null,
           status,
+          photos: [],
         })
         .select()
         .single();
 
       if (err) throw err;
+
+      // Upload photos to Supabase Storage
+      if (data.photoFiles.length > 0) {
+        const uploadedUrls: string[] = [];
+        for (const file of data.photoFiles) {
+          const ext = file.name.split(".").pop() || "jpg";
+          const path = `photos/${cert.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error: uploadErr } = await supabase.storage
+            .from("certificates")
+            .upload(path, file, { contentType: file.type });
+          if (!uploadErr) {
+            const { data: pub } = supabase.storage
+              .from("certificates")
+              .getPublicUrl(path);
+            uploadedUrls.push(pub.publicUrl);
+          }
+        }
+        if (uploadedUrls.length > 0) {
+          await supabase
+            .from("certificates")
+            .update({ photos: uploadedUrls })
+            .eq("id", cert.id);
+        }
+      }
 
       // If sent, trigger email via API
       if (status === "sent" && data.client_email) {
@@ -378,66 +453,97 @@ export default function CertificateForm({ technician }: Props) {
           </div>
 
           <div className="card p-6">
-            <h2 className="font-bold text-lg mb-4">💊 Preparati</h2>
-            <div className="grid grid-cols-[1fr_1fr_32px] gap-2 mb-2">
-              <span className="label">Emri i preparatit</span>
-              <span className="label">Doza / Shënim</span>
-              <span></span>
+            <h2 className="font-bold text-lg mb-3">💊 Preparati</h2>
+
+            {/* Quick-pick pill buttons */}
+            <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">
+              Shpejtë — kliko për të shtuar
+            </p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {COMMON_PRODUCTS.map((name) => {
+                const selected = data.products.some((p) => p.emri === name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => toggleCommonProduct(name)}
+                    className={`px-3 py-1.5 rounded-full border-2 font-semibold text-sm transition-all ${
+                      selected
+                        ? "bg-[#1a6b2a] border-[#1a6b2a] text-white"
+                        : "border-gray-200 text-gray-600 hover:border-[#1a6b2a]"
+                    }`}
+                  >
+                    {selected ? "✓ " : ""}{name}
+                  </button>
+                );
+              })}
             </div>
-            {data.products.map((p, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_32px] gap-2 mb-2">
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="p.sh. Solfac EW 50"
-                  value={p.emri}
-                  onChange={(e) =>
-                    setData((d) => {
-                      const prods = [...d.products];
-                      prods[i].emri = e.target.value;
-                      return { ...d, products: prods };
-                    })
-                  }
-                />
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="50ml/L"
-                  value={p.doza}
-                  onChange={(e) =>
-                    setData((d) => {
-                      const prods = [...d.products];
-                      prods[i].doza = e.target.value;
-                      return { ...d, products: prods };
-                    })
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setData((d) => ({
-                      ...d,
-                      products: d.products.filter((_, j) => j !== i),
-                    }))
-                  }
-                  className="text-gray-400 hover:text-red-500 text-xl font-bold leading-none"
-                >
-                  ×
-                </button>
+
+            {/* Manual product rows */}
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">
+                Të gjitha preparatet e zgjedhura / manual
+              </p>
+              <div className="grid grid-cols-[1fr_1fr_32px] gap-2 mb-2">
+                <span className="label">Emri i preparatit</span>
+                <span className="label">Doza / Shënim</span>
+                <span></span>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setData((d) => ({
-                  ...d,
-                  products: [...d.products, { emri: "", doza: "" }],
-                }))
-              }
-              className="text-sm font-semibold text-[#1a6b2a] border-2 border-dashed border-[#1a6b2a]/30 rounded-lg px-4 py-2 hover:bg-green-pale transition-colors mt-1"
-            >
-              + Shto preparat
-            </button>
+              {data.products.map((p, i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_32px] gap-2 mb-2">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="p.sh. Solfac EW 50"
+                    value={p.emri}
+                    onChange={(e) =>
+                      setData((d) => {
+                        const prods = [...d.products];
+                        prods[i] = { ...prods[i], emri: e.target.value };
+                        return { ...d, products: prods };
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="50ml/L"
+                    value={p.doza}
+                    onChange={(e) =>
+                      setData((d) => {
+                        const prods = [...d.products];
+                        prods[i] = { ...prods[i], doza: e.target.value };
+                        return { ...d, products: prods };
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setData((d) => ({
+                        ...d,
+                        products: d.products.filter((_, j) => j !== i),
+                      }))
+                    }
+                    className="text-gray-400 hover:text-red-500 text-xl font-bold leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setData((d) => ({
+                    ...d,
+                    products: [...d.products, { emri: "", doza: "" }],
+                  }))
+                }
+                className="text-sm font-semibold text-[#1a6b2a] border-2 border-dashed border-[#1a6b2a]/30 rounded-lg px-4 py-2 hover:bg-green-pale transition-colors mt-1"
+              >
+                + Shto preparat manual
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -594,65 +700,120 @@ export default function CertificateForm({ technician }: Props) {
         </div>
       )}
 
-      {/* STEP 4 – KONFIRMO */}
+      {/* STEP 4 – FOTO & KONFIRMO */}
       {step === 4 && (
-        <div className="card p-6 space-y-4">
-          <h2 className="font-bold text-lg">✅ Konfirmo vërtetimin</h2>
-          <ReviewRow label="Klienti" value={data.client_name} />
-          <ReviewRow label="Adresa" value={data.client_address} />
-          <ReviewRow label="Email" value={data.client_email} />
-          <ReviewRow
-            label="Data"
-            value={`${data.service_date}${data.service_time ? " ora " + data.service_time : ""}`}
-          />
-          <ReviewRow label="Shërbimi" value={data.service_types.join(", ")} />
-          <ReviewRow
-            label="Dëmtuesit"
-            value={[...data.pest_types, data.pest_other]
-              .filter(Boolean)
-              .join(", ")}
-          />
-          <ReviewRow
-            label="Preparati"
-            value={data.products
-              .filter((p) => p.emri)
-              .map((p) => `${p.emri}${p.doza ? " (" + p.doza + ")" : ""}`)
-              .join(", ")}
-          />
-          <ReviewRow
-            label="Zona e gjelbërt"
-            value={data.zones_green.join(", ")}
-          />
-          <ReviewRow
-            label="Zona e verdhë"
-            value={data.zones_yellow.join(", ")}
-          />
-          <ReviewRow label="Zona e kuqe" value={data.zones_red.join(", ")} />
+        <div className="space-y-4">
+          {/* Photo upload */}
+          <div className="card p-6">
+            <h2 className="font-bold text-lg mb-3">📸 Foto (opsionale)</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              Bashkëngjit foto nga vendi i punës
+            </p>
 
-          <div className="border-t pt-4 mt-2 space-y-3">
+            {data.photoPreviewUrls.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {data.photoPreviewUrls.map((url, idx) => (
+                  <div key={idx} className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`Foto ${idx + 1}`}
+                      className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(idx)}
+                      className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handlePhotoSelect}
+            />
             <button
-              onClick={() => save("draft")}
-              disabled={saving}
-              className="btn-secondary w-full flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              className="w-full border-2 border-dashed border-[#1a6b2a]/30 rounded-xl py-4 text-sm font-semibold text-[#1a6b2a] hover:bg-green-pale transition-colors flex items-center justify-center gap-2"
             >
-              {saving ? "⟳ Duke ruajtur..." : "💾 Ruaj si Draft"}
+              📷 Zgjedh foto
             </button>
-            {data.client_email && (
+          </div>
+
+          {/* Review & confirm */}
+          <div className="card p-6 space-y-4">
+            <h2 className="font-bold text-lg">✅ Konfirmo vërtetimin</h2>
+            <ReviewRow label="Klienti" value={data.client_name} />
+            <ReviewRow label="Adresa" value={data.client_address} />
+            <ReviewRow label="Email" value={data.client_email} />
+            <ReviewRow
+              label="Data"
+              value={`${data.service_date}${data.service_time ? " ora " + data.service_time : ""}`}
+            />
+            <ReviewRow label="Shërbimi" value={data.service_types.join(", ")} />
+            <ReviewRow
+              label="Dëmtuesit"
+              value={[...data.pest_types, data.pest_other]
+                .filter(Boolean)
+                .join(", ")}
+            />
+            <ReviewRow
+              label="Preparati"
+              value={data.products
+                .filter((p) => p.emri)
+                .map((p) => `${p.emri}${p.doza ? " (" + p.doza + ")" : ""}`)
+                .join(", ")}
+            />
+            <ReviewRow
+              label="Zona e gjelbërt"
+              value={data.zones_green.join(", ")}
+            />
+            <ReviewRow
+              label="Zona e verdhë"
+              value={data.zones_yellow.join(", ")}
+            />
+            <ReviewRow label="Zona e kuqe" value={data.zones_red.join(", ")} />
+            {data.photoFiles.length > 0 && (
+              <ReviewRow
+                label="Foto"
+                value={`${data.photoFiles.length} foto të bashkëngjitura`}
+              />
+            )}
+
+            <div className="border-t pt-4 mt-2 space-y-3">
               <button
-                onClick={() => save("sent")}
+                onClick={() => save("draft")}
                 disabled={saving}
-                className="btn-primary w-full flex items-center justify-center gap-2"
+                className="btn-secondary w-full flex items-center justify-center gap-2"
               >
-                {saving
-                  ? "⟳ Duke dërguar..."
-                  : "📧 Ruaj & Dërgo Email te Klienti"}
+                {saving ? "⟳ Duke ruajtur..." : "💾 Ruaj si Draft"}
               </button>
-            )}
-            {!data.client_email && (
-              <p className="text-xs text-gray-400 text-center">
-                Shto email-in e klientit për ta dërguar direkt
-              </p>
-            )}
+              {data.client_email && (
+                <button
+                  onClick={() => save("sent")}
+                  disabled={saving}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  {saving
+                    ? "⟳ Duke dërguar..."
+                    : "📧 Ruaj & Dërgo Email te Klienti"}
+                </button>
+              )}
+              {!data.client_email && (
+                <p className="text-xs text-gray-400 text-center">
+                  Shto email-in e klientit për ta dërguar direkt
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -10,7 +10,8 @@ export async function sendCertificateEmail(cert: Certificate, pdfUrl: string) {
   const { data, error } = await resend.emails.send({
     from: process.env.RESEND_FROM_EMAIL || 'EcoPest DDD <noreply@ecopest-ddd.com>',
     to: cert.client_email!,
-    subject: `Vërtetim Shërbimi DDD – ${cert.client_name} (Nr. ${cert.serial_no})`,
+    cc: ['info@ecopest-ddd.com'],
+    subject: `Vërtetim Shërbimi DDD – ${cert.client_name} (${cert.client_email}) (Nr. ${cert.serial_no})`,
     html: `
 <!DOCTYPE html>
 <html lang="sq">

@@ -195,7 +195,6 @@ export default function CertificateForm({ technician }: Props) {
           sanitary_report: data.sanitary_report,
           notes: data.notes || null,
           status,
-          photos: [],
         })
         .select()
         .single();
@@ -237,7 +236,8 @@ export default function CertificateForm({ technician }: Props) {
 
       router.push(`/certificate/${cert.id}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Gabim i panjohur");
+      const msg = e instanceof Error ? e.message : JSON.stringify(e);
+      setError(msg || "Gabim i panjohur");
       setSaving(false);
     }
   };

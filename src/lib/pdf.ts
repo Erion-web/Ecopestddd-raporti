@@ -208,29 +208,85 @@ export async function generateCertificatePDF(cert: Certificate): Promise<Blob> {
     y += lines.length * 5 + 6
   }
 
-  // Signature
-  if (cert.client_signature) {
-    if (y > 240) { doc.addPage(); y = 14 }
-    sectionHeader('Nënshkrimi i Klientit', GREEN)
-    try {
-      doc.addImage(cert.client_signature, 'PNG', ml, y, 60, 20)
-      y += 25
-    } catch {}
-  }
+  // Signature lines + both signatures
+  if (y > 220) { doc.addPage(); y = 14 }
+  sectionHeader('Nënshkrimet', GREEN)
 
-  // Signature lines
-  if (y > 260) { doc.addPage(); y = 14 }
-  y += 8
+  // Side-by-side signature boxes
+  const sigW = (cw - 4) / 2
+  // Client signature box
   doc.setDrawColor(...BORDER)
-  doc.line(ml, y, ml + 55, y)
-  doc.line(ml + 70, y, ml + 125, y)
-  doc.line(ml + 140, y, W - mr, y)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
+  doc.setFillColor(...LGRAY)
+  doc.rect(ml, y, sigW, 28, 'FD')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
   doc.setTextColor(100, 100, 100)
-  doc.text('Teknik: ' + cert.technician_name, ml, y + 5)
-  doc.text('Emri i klientit', ml + 70, y + 5)
-  doc.text('Nënshkrimi', ml + 140, y + 5)
+  doc.text('Nënshkrimi i Klientit', ml + 2, y + 5)
+  if (cert.client_signature) {
+    try {
+      doc.addImage(cert.client_signature, 'PNG', ml + 2, y + 7, sigW - 4, 18)
+    } catch {}
+  } else {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(7)
+    doc.setTextColor(180, 180, 180)
+    doc.text('(pa nënshkrim)', ml + 2, y + 18)
+  }
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(100, 100, 100)
+  doc.line(ml + 2, y + 25, ml + sigW - 2, y + 25)
+
+  // Technician signature box
+  const techX = ml + sigW + 4
+  doc.setDrawColor(...BORDER)
+  doc.setFillColor(...LGRAY)
+  doc.rect(techX, y, sigW, 28, 'FD')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
+  doc.setTextColor(100, 100, 100)
+  doc.text('Nënshkrimi i Teknikut: ' + cert.technician_name, techX + 2, y + 5)
+  if (cert.technician_signature) {
+    try {
+      doc.addImage(cert.technician_signature, 'PNG', techX + 2, y + 7, sigW - 4, 18)
+    } catch {}
+  } else {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(7)
+    doc.setTextColor(180, 180, 180)
+    doc.text('(pa nënshkrim)', techX + 2, y + 18)
+  }
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7)
+  doc.setTextColor(100, 100, 100)
+  doc.line(techX + 2, y + 25, techX + sigW - 2, y + 25)
+
+  y += 32
+
+  // Photos section
+  if (cert.photos && cert.photos.length > 0) {
+    if (y > 200) { doc.addPage(); y = 14 }
+    sectionHeader('Foto nga Vendi i Punës', GREEN)
+    const photoW = (cw - 4) / 2
+    let photoX = ml
+    for (const photoUrl of cert.photos) {
+      try {
+        if (y + 50 > 275) { doc.addPage(); y = 14; photoX = ml }
+        // jsPDF can load URLs directly
+        doc.addImage(photoUrl, 'JPEG', photoX, y, photoW, 45, undefined, 'FAST')
+        if (photoX === ml) {
+          photoX = ml + photoW + 4
+        } else {
+          photoX = ml
+          y += 48
+        }
+      } catch {
+        // skip failed image
+      }
+    }
+    if (photoX !== ml) y += 48 // finish partial row
+    y += 4
+  }
 
   // Footer on all pages
   const pageCount = doc.internal.getNumberOfPages()

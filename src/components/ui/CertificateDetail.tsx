@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import type { Certificate } from '@/types'
 import { generateCertificatePDF } from '@/lib/pdf'
@@ -19,6 +19,11 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
   const [copying, setCopying] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [msg, setMsg] = useState('')
+  const [showTechSign, setShowTechSign] = useState(false)
+  const [isTechDrawing, setIsTechDrawing] = useState(false)
+  const [savingTechSig, setSavingTechSig] = useState(false)
+  const [techSigned, setTechSigned] = useState(!!cert.technician_signature)
+  const techCanvasRef = useRef<HTMLCanvasElement>(null)
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
@@ -65,6 +70,64 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
     const { error } = await supabase.from('certificates').delete().eq('id', cert.id)
     if (error) { showMsg('❌ Gabim gjatë fshirjes'); setDeleting(false); return }
     window.location.href = '/dashboard'
+  }
+
+  // ── Technician signature helpers ──
+  const getTechPos = (e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement) => {
+    const rect = canvas.getBoundingClientRect()
+    if ('touches' in e) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }
+    }
+    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top }
+  }
+
+  const startTechDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault()
+    const canvas = techCanvasRef.current!
+    const ctx = canvas.getContext('2d')!
+    const pos = getTechPos(e, canvas)
+    ctx.beginPath()
+    ctx.moveTo(pos.x, pos.y)
+    setIsTechDrawing(true)
+  }
+
+  const techDraw = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault()
+    if (!isTechDrawing) return
+    const canvas = techCanvasRef.current!
+    const ctx = canvas.getContext('2d')!
+    const pos = getTechPos(e, canvas)
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = '#1a1d23'
+    ctx.lineTo(pos.x, pos.y)
+    ctx.stroke()
+  }
+
+  const stopTechDraw = () => setIsTechDrawing(false)
+
+  const clearTechSig = () => {
+    const canvas = techCanvasRef.current!
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
+  const saveTechSig = async () => {
+    const canvas = techCanvasRef.current!
+    const sig = canvas.toDataURL('image/png')
+    setSavingTechSig(true)
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { error } = await supabase.from('certificates').update({
+      technician_signature: sig,
+      technician_signed_at: new Date().toISOString(),
+      status: cert.client_signature ? 'signed' : cert.status,
+    }).eq('id', cert.id)
+    setSavingTechSig(false)
+    if (error) { showMsg('❌ Gabim gjatë ruajtjes'); return }
+    setTechSigned(true)
+    setShowTechSign(false)
+    showMsg('✅ Nënshkrimi i teknikut u ruajt!')
   }
 
   return (
@@ -145,7 +208,7 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
         )}
         <button onClick={copyLink}
           className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border-2 border-blue-200 font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform col-span-1">
-          {copying ? '✅ U kopjua!' : '🔗 Kopjo Link'}
+          {copying ? '✅ U kopjua!' : '🔗 Kopjo Link Klientit'}
         </button>
         {isOwner && (
           <button onClick={deleteCert} disabled={deleting}
@@ -154,6 +217,48 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
           </button>
         )}
       </div>
+
+      {/* ── TECHNICIAN SIGN BUTTON ── */}
+      {!techSigned ? (
+        <button
+          onClick={() => setShowTechSign((v) => !v)}
+          className="w-full mb-4 flex items-center justify-center gap-2 bg-[#04442F]/10 text-[#04442F] border-2 border-[#04442F]/20 font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform"
+        >
+          ✍️ {showTechSign ? 'Mbyll nënshkrimin' : 'Nënshkruaj si Teknik'}
+        </button>
+      ) : (
+        <div className="w-full mb-4 flex items-center justify-center gap-2 bg-green-pale text-[#04442F] border-2 border-[#04442F]/20 font-bold py-3 rounded-xl text-sm">
+          ✅ Teknik ka nënshkruar
+        </div>
+      )}
+
+      {/* ── TECH SIGNATURE PAD ── */}
+      {showTechSign && !techSigned && (
+        <div className="card p-5 mb-4">
+          <h3 className="font-bold mb-3 text-sm">✍️ Nënshkrimi i Teknikut</h3>
+          <div className="border-2 border-dashed border-gray-300 rounded-xl overflow-hidden bg-white">
+            <canvas
+              ref={techCanvasRef}
+              width={380}
+              height={120}
+              className="w-full touch-none cursor-crosshair"
+              onMouseDown={startTechDraw}
+              onMouseMove={techDraw}
+              onMouseUp={stopTechDraw}
+              onMouseLeave={stopTechDraw}
+              onTouchStart={startTechDraw}
+              onTouchMove={techDraw}
+              onTouchEnd={stopTechDraw}
+            />
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={clearTechSig} className="btn-secondary flex-1 text-sm py-2">🗑️ Fshi</button>
+            <button onClick={saveTechSig} disabled={savingTechSig} className="btn-primary flex-1 text-sm py-2">
+              {savingTechSig ? '⟳ Duke ruajtur...' : '✅ Konfirmo'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── INFO SECTIONS ── */}
 
@@ -221,17 +326,51 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
         </Section>
       )}
 
-      {/* Nënshkrimi */}
+      {/* Nënshkrimi i Klientit */}
       {cert.client_signature && (
         <Section title="✍️ Nënshkrimi i Klientit" color="green">
           <div className="bg-gray-50 rounded-xl p-3 mt-1">
-            <img src={cert.client_signature} alt="Nënshkrimi" className="max-h-24 mx-auto" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={cert.client_signature} alt="Nënshkrimi i klientit" className="max-h-24 mx-auto" />
           </div>
           {cert.signed_at && (
             <p className="text-xs text-gray-400 mt-2 text-center">
               Nënshkruar: {cert.signed_at.slice(0, 16).replace('T', ' ora ')}
             </p>
           )}
+        </Section>
+      )}
+
+      {/* Nënshkrimi i Teknikut */}
+      {cert.technician_signature && (
+        <Section title="✍️ Nënshkrimi i Teknikut" color="green">
+          <div className="bg-gray-50 rounded-xl p-3 mt-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={cert.technician_signature} alt="Nënshkrimi i teknikut" className="max-h-24 mx-auto" />
+          </div>
+          {cert.technician_signed_at && (
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              Nënshkruar: {cert.technician_signed_at.slice(0, 16).replace('T', ' ora ')}
+            </p>
+          )}
+        </Section>
+      )}
+
+      {/* Foto */}
+      {cert.photos && cert.photos.length > 0 && (
+        <Section title="📸 Foto" color="green">
+          <div className="grid grid-cols-2 gap-2 py-2">
+            {cert.photos.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`Foto ${i + 1}`}
+                  className="w-full h-32 object-cover rounded-xl border border-gray-200 hover:opacity-90 transition-opacity"
+                />
+              </a>
+            ))}
+          </div>
         </Section>
       )}
 

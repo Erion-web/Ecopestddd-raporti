@@ -41,6 +41,9 @@ export interface Certificate {
   status: CertStatus
   client_signature?: string
   signed_at?: string
+  technician_signature?: string
+  technician_signed_at?: string
+  photos?: string[]
   pdf_path?: string
   next_service_date?: string
   created_at: string

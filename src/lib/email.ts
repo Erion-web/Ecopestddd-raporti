@@ -4,7 +4,7 @@ import type { Certificate } from '@/types'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-export async function sendCertificateEmail(cert: Certificate, pdfUrl: string) {
+export async function sendCertificateEmail(cert: Certificate, certUrl: string) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
 
   const { data, error } = await resend.emails.send({
@@ -75,7 +75,7 @@ export async function sendCertificateEmail(cert: Certificate, pdfUrl: string) {
     </div>
 
     <div style="text-align:center;margin:24px 0">
-      <a href="${pdfUrl}" class="btn">📄 Shkarko PDF</a>
+      <a href="${certUrl}" class="btn">📄 Shiko & Shkarko PDF</a>
       <br>
       <a href="${appUrl}/sign/${cert.id}" class="btn-sign">✍️ Nënshkruaj Vërtetimin</a>
     </div>

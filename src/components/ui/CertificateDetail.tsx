@@ -14,7 +14,7 @@ const STATUS_LABELS: Record<string, string> = {
   draft: '📝 Draft', sent: '📧 Dërguar', signed: '✅ Nënshkruar', archived: '📦 Arkivuar',
 }
 
-export default function CertificateDetail({ cert, isOwner }: { cert: Certificate; isOwner: boolean }) {
+export default function CertificateDetail({ cert, isOwner, isAdmin }: { cert: Certificate; isOwner: boolean; isAdmin?: boolean }) {
   const [sending, setSending] = useState(false)
   const [copying, setCopying] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -210,6 +210,12 @@ export default function CertificateDetail({ cert, isOwner }: { cert: Certificate
           className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 border-2 border-blue-200 font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform col-span-1">
           {copying ? '✅ U kopjua!' : '🔗 Kopjo Link Klientit'}
         </button>
+        {(isOwner || isAdmin) && (
+          <Link href={`/certificate/${cert.id}/edit`}
+            className="flex items-center justify-center gap-2 bg-yellow-50 text-yellow-700 border-2 border-yellow-300 font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform">
+            ✏️ Edito{isAdmin ? ' (Admin)' : ''}
+          </Link>
+        )}
         {isOwner && (
           <button onClick={deleteCert} disabled={deleting}
             className="flex items-center justify-center gap-2 bg-red-50 text-red-600 border-2 border-red-200 font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform disabled:opacity-60">

@@ -27,12 +27,28 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Protected routes — require login
-  const protectedPaths = ['/dashboard', '/certificate/new', '/certificate']
-  const isProtected = protectedPaths.some(p => pathname.startsWith(p))
+  // Protected routes — require login.
+  // NOTE: viewing a single certificate (/certificate/[id]) is intentionally
+  // public so PDFs/reports can be shared with clients without an account.
+  const isProtected =
+    pathname.startsWith('/dashboard') ||
+    pathname === '/certificate/new' ||
+    /^\/certificate\/[^/]+\/edit$/.test(pathname)
 
   if (isProtected && !user) {
     return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  // Deactivated technicians lose all access, even with a valid session
+  if (isProtected && user) {
+    const { data: tech } = await supabase
+      .from('technicians').select('active').eq('id', user.id).single()
+    if (tech && tech.active === false) {
+      await supabase.auth.signOut()
+      const url = new URL('/login', request.url)
+      url.searchParams.set('error', 'deactivated')
+      return NextResponse.redirect(url)
+    }
   }
 
   // Already logged in, redirect away from login

@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ||
       "https://ecopestddd-raporti.vercel.app";
-    const pdfUrl = `${appUrl}/api/certificates/${certId}/pdf`;
+    const certUrl = `${appUrl}/certificate/${certId}`;
 
-    await sendCertificateEmail(cert, pdfUrl);
+    await sendCertificateEmail(cert, certUrl);
 
     // Update status to 'sent'
     await supabase

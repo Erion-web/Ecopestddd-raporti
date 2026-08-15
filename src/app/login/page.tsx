@@ -1,13 +1,26 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const searchParams = useSearchParams()
+  const [error, setError] = useState(
+    searchParams.get('error') === 'deactivated'
+      ? 'Llogaria juaj është çaktivizuar. Kontaktoni adminin.'
+      : ''
+  )
   const router = useRouter()
   const supabase = createClient()
 

@@ -22,7 +22,7 @@ function daysUntil(dateStr: string) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; tab?: string }>
+  searchParams: Promise<{ q?: string; status?: string; tab?: string; technician?: string }>
 }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -34,21 +34,30 @@ export default async function DashboardPage({
   const statusFilter = params.status || ''
   const tab = params.tab || 'list'
   const isAdmin = tech?.role === 'admin'
+  // Admins can drill into a single technician's certificates
+  const technicianFilter = isAdmin ? params.technician || '' : ''
+  let filteredTechnician: Technician | null = null
+  if (technicianFilter) {
+    const { data: ft } = await supabase
+      .from('technicians').select('*').eq('id', technicianFilter).single()
+    filteredTechnician = ft
+  }
 
   // Certificates for list
   let query = supabase
     .from('certificates')
     .select('*')
     .order('created_at', { ascending: false })
-  if (!isAdmin) query = query.eq('technician_id', user!.id)
+  if (technicianFilter) query = query.eq('technician_id', technicianFilter)
+  else if (!isAdmin) query = query.eq('technician_id', user!.id)
   if (statusFilter) query = query.eq('status', statusFilter)
   if (q) query = query.ilike('client_name', `%${q}%`)
   const { data: certs } = await query.limit(50) as { data: Certificate[] }
 
   // All certs for stats + reminders
-  const allQuery = isAdmin
-    ? supabase.from('certificates').select('id, status, created_at, next_service_date, client_name, client_phone, serial_no, service_date')
-    : supabase.from('certificates').select('id, status, created_at, next_service_date, client_name, client_phone, serial_no, service_date').eq('technician_id', user!.id)
+  let allQuery = supabase.from('certificates').select('id, status, created_at, next_service_date, client_name, client_phone, serial_no, service_date')
+  if (technicianFilter) allQuery = allQuery.eq('technician_id', technicianFilter)
+  else if (!isAdmin) allQuery = allQuery.eq('technician_id', user!.id)
   const { data: allCerts } = await allQuery
 
   const now = new Date()
@@ -74,6 +83,18 @@ export default async function DashboardPage({
 
   return (
     <div className="pb-6">
+
+      {/* ── TECHNICIAN FILTER BANNER (admin drill-down) ── */}
+      {filteredTechnician && (
+        <div className="flex items-center justify-between gap-3 bg-blue-50 border-2 border-blue-200 rounded-2xl px-4 py-3 mb-4">
+          <div className="text-sm text-blue-800">
+            Duke shikuar vërtetimet e <strong>{filteredTechnician.full_name}</strong>
+          </div>
+          <Link href="/dashboard" className="text-xs font-bold text-blue-700 underline flex-shrink-0">
+            Pastro
+          </Link>
+        </div>
+      )}
 
       {/* ── REMINDER ALERT BANNER ── */}
       {reminders.length > 0 && (
@@ -198,6 +219,7 @@ export default async function DashboardPage({
           {/* Search */}
           <form method="GET" className="flex gap-2 mb-3">
             <input type="hidden" name="tab" value="list" />
+            {technicianFilter && <input type="hidden" name="technician" value={technicianFilter} />}
             <input name="q" defaultValue={q} placeholder="🔍 Kërko klientin..."
               className="input flex-1 text-base py-3.5 rounded-xl" />
             <button type="submit" className="btn-primary px-4 rounded-xl text-sm">Kërko</button>
@@ -212,7 +234,7 @@ export default async function DashboardPage({
               { val: 'signed',  label: '✅ Nënshkruar' },
             ].map(s => (
               <a key={s.val}
-                href={`/dashboard?tab=list&status=${s.val}${q ? '&q='+q : ''}`}
+                href={`/dashboard?tab=list&status=${s.val}${q ? '&q='+q : ''}${technicianFilter ? '&technician='+technicianFilter : ''}`}
                 className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
                   statusFilter === s.val
                     ? 'bg-[#1a6b2a] text-white'

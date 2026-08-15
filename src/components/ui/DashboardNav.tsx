@@ -32,6 +32,12 @@ export default function DashboardNav({ technician }: { technician: Technician | 
               <div className="text-sm font-semibold leading-none">{technician?.full_name || 'Teknik'}</div>
               <div className="text-xs text-white/60">{technician?.role === 'admin' ? '👑 Admin' : '🔧 Teknik'}</div>
             </div>
+            {technician?.role === 'admin' && (
+              <Link href="/dashboard/admin"
+                className="text-white/80 hover:text-white text-xs font-bold px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
+                👑 Admin
+              </Link>
+            )}
             <button onClick={logout}
               className="text-white/70 hover:text-white text-sm p-2 rounded-lg hover:bg-white/10 transition-colors">
               Dil

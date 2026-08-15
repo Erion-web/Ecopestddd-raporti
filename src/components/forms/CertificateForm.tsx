@@ -1,6 +1,6 @@
 "use client";
 import { createClient } from "@/lib/supabase/client";
-import type { Product, Technician } from "@/types";
+import type { Certificate, CertStatus, Product, Technician } from "@/types";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
@@ -66,11 +66,14 @@ const COMMON_PRODUCTS = [
 
 interface Props {
   technician: Technician | null;
+  certificate?: Certificate | null;
+  isAdmin?: boolean;
 }
 
-export default function CertificateForm({ technician }: Props) {
+export default function CertificateForm({ technician, certificate, isAdmin }: Props) {
   const router = useRouter();
   const supabase = createClient();
+  const isEdit = !!certificate;
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -81,26 +84,33 @@ export default function CertificateForm({ technician }: Props) {
   const autoTime = now.toTimeString().slice(0, 5);
 
   const [data, setData] = useState({
-    service_date: autoDate,
-    service_time: autoTime,
-    client_name: "",
-    client_branch: "",
-    client_address: "",
-    client_phone: "",
-    client_email: "",
-    service_types: [] as string[],
-    pest_types: [] as string[],
+    service_date: certificate?.service_date || autoDate,
+    service_time: certificate?.service_time || autoTime,
+    client_name: certificate?.client_name || "",
+    client_branch: certificate?.client_branch || "",
+    client_address: certificate?.client_address || "",
+    client_phone: certificate?.client_phone || "",
+    client_email: certificate?.client_email || "",
+    service_types: certificate?.service_types || ([] as string[]),
+    pest_types: certificate?.pest_types || ([] as string[]),
     pest_other: "",
-    products: [] as Product[],
-    zones_green: [] as string[],
-    zones_yellow: [] as string[],
-    zones_red: [] as string[],
-    sanitary_report: Object.fromEntries(
-      SANITARY_ITEMS.map((i) => [i, null])
-    ) as Record<string, "po" | "jo" | null>,
-    notes: "",
+    products: certificate?.products || ([] as Product[]),
+    zones_green: certificate?.zones_green || ([] as string[]),
+    zones_yellow: certificate?.zones_yellow || ([] as string[]),
+    zones_red: certificate?.zones_red || ([] as string[]),
+    sanitary_report: (certificate?.sanitary_report ||
+      Object.fromEntries(
+        SANITARY_ITEMS.map((i) => [i, null])
+      )) as Record<string, "po" | "jo" | null>,
+    notes: certificate?.notes || "",
     photoFiles: [] as File[],
     photoPreviewUrls: [] as string[],
+    existingPhotos: certificate?.photos || ([] as string[]),
+    // Admin-only override fields
+    serial_no: certificate?.serial_no ?? 0,
+    request_no: certificate?.request_no || "",
+    reference_no: certificate?.reference_no || "",
+    status: (certificate?.status || "draft") as CertStatus,
   });
 
   const toggle = (arr: string[], val: string): string[] =>
@@ -141,9 +151,16 @@ export default function CertificateForm({ technician }: Props) {
     });
   };
 
+  const removeExistingPhoto = (idx: number) => {
+    setData((d) => ({
+      ...d,
+      existingPhotos: d.existingPhotos.filter((_, i) => i !== idx),
+    }));
+  };
+
   const steps = ["Klienti", "Shërbimi", "Zonat", "Sanitaria", "Foto & Konfirmo"];
 
-  const save = async (status: "draft" | "sent" = "draft") => {
+  const save = async (status: CertStatus = "draft") => {
     setSaving(true);
     setError("");
     try {
@@ -174,40 +191,63 @@ export default function CertificateForm({ technician }: Props) {
         }
       }
 
-      const { data: cert, error: err } = await supabase
-        .from("certificates")
-        .insert({
-          technician_id: techId,
-          technician_name: techName,
-          service_date: data.service_date,
-          service_time: data.service_time || null,
-          client_name: data.client_name,
-          client_branch: data.client_branch || null,
-          client_address: data.client_address || null,
-          client_phone: data.client_phone || null,
-          client_email: data.client_email || null,
-          service_types: data.service_types,
-          pest_types,
-          products,
-          zones_green: data.zones_green,
-          zones_yellow: data.zones_yellow,
-          zones_red: data.zones_red,
-          sanitary_report: data.sanitary_report,
-          notes: data.notes || null,
-          status,
-          photos: [],
-        })
-        .select()
-        .single();
+      const payload: Record<string, unknown> = {
+        service_date: data.service_date,
+        service_time: data.service_time || null,
+        client_name: data.client_name,
+        client_branch: data.client_branch || null,
+        client_address: data.client_address || null,
+        client_phone: data.client_phone || null,
+        client_email: data.client_email || null,
+        service_types: data.service_types,
+        pest_types,
+        products,
+        zones_green: data.zones_green,
+        zones_yellow: data.zones_yellow,
+        zones_red: data.zones_red,
+        sanitary_report: data.sanitary_report,
+        notes: data.notes || null,
+        status,
+      };
 
-      if (err) throw err;
+      // Admin-only overrides — numbering / reference fields
+      if (isAdmin) {
+        payload.serial_no = data.serial_no;
+        payload.request_no = data.request_no || null;
+        payload.reference_no = data.reference_no || null;
+      }
 
-      // Upload photos to Supabase Storage
+      let certId: string;
+      let wasAlreadySent = false;
+
+      if (isEdit && certificate) {
+        certId = certificate.id;
+        wasAlreadySent = certificate.status === "sent";
+        payload.photos = data.existingPhotos;
+        const { error: err } = await supabase
+          .from("certificates")
+          .update(payload)
+          .eq("id", certificate.id);
+        if (err) throw err;
+      } else {
+        payload.technician_id = techId;
+        payload.technician_name = techName;
+        payload.photos = [];
+        const { data: cert, error: err } = await supabase
+          .from("certificates")
+          .insert(payload)
+          .select()
+          .single();
+        if (err) throw err;
+        certId = cert.id;
+      }
+
+      // Upload new photos to Supabase Storage
       if (data.photoFiles.length > 0) {
         const uploadedUrls: string[] = [];
         for (const file of data.photoFiles) {
           const ext = file.name.split(".").pop() || "jpg";
-          const path = `photos/${cert.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+          const path = `photos/${certId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
           const { error: uploadErr } = await supabase.storage
             .from("certificates")
             .upload(path, file, { contentType: file.type });
@@ -221,21 +261,21 @@ export default function CertificateForm({ technician }: Props) {
         if (uploadedUrls.length > 0) {
           await supabase
             .from("certificates")
-            .update({ photos: uploadedUrls })
-            .eq("id", cert.id);
+            .update({ photos: [...data.existingPhotos, ...uploadedUrls] })
+            .eq("id", certId);
         }
       }
 
-      // If sent, trigger email via API
-      if (status === "sent" && data.client_email) {
+      // If newly marked as sent, trigger email via API
+      if (status === "sent" && !wasAlreadySent && data.client_email) {
         await fetch("/api/email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ certId: cert.id }),
+          body: JSON.stringify({ certId }),
         });
       }
 
-      router.push(`/certificate/${cert.id}`);
+      router.push(`/certificate/${certId}`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Gabim i panjohur");
       setSaving(false);
@@ -249,7 +289,9 @@ export default function CertificateForm({ technician }: Props) {
       {/* Progress */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-xl font-bold">Vërtetim i Ri</h1>
+          <h1 className="text-xl font-bold">
+            {isEdit ? "Edito Vërtetimin" : "Vërtetim i Ri"}
+          </h1>
           <span className="font-mono text-sm text-gray-500">
             {step + 1} / {steps.length}
           </span>
@@ -281,6 +323,63 @@ export default function CertificateForm({ technician }: Props) {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
           {error}
+        </div>
+      )}
+
+      {/* ADMIN OVERRIDE PANEL — numbering & status, admin only */}
+      {isAdmin && step === 0 && (
+        <div className="card p-6 space-y-4 mb-4 border-2 border-yellow-300 bg-yellow-50/40">
+          <h2 className="font-bold text-lg mb-2">🛠️ Admin — Numrat & Statusi</h2>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="label">Nr. Serik</label>
+              <input
+                type="number"
+                className="input"
+                value={data.serial_no}
+                onChange={(e) =>
+                  setData((d) => ({ ...d, serial_no: Number(e.target.value) }))
+                }
+              />
+            </div>
+            <div>
+              <label className="label">Nr. Kërkesës</label>
+              <input
+                type="text"
+                className="input"
+                value={data.request_no}
+                onChange={(e) =>
+                  setData((d) => ({ ...d, request_no: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <label className="label">Nr. Referencës</label>
+              <input
+                type="text"
+                className="input"
+                value={data.reference_no}
+                onChange={(e) =>
+                  setData((d) => ({ ...d, reference_no: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <div>
+            <label className="label">Statusi</label>
+            <select
+              className="input"
+              value={data.status}
+              onChange={(e) =>
+                setData((d) => ({ ...d, status: e.target.value as CertStatus }))
+              }
+            >
+              <option value="draft">📝 Draft</option>
+              <option value="sent">📧 Dërguar</option>
+              <option value="signed">✅ Nënshkruar</option>
+              <option value="archived">📦 Arkivuar</option>
+            </select>
+          </div>
         </div>
       )}
 
@@ -710,6 +809,28 @@ export default function CertificateForm({ technician }: Props) {
               Bashkëngjit foto nga vendi i punës
             </p>
 
+            {data.existingPhotos.length > 0 && (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {data.existingPhotos.map((url, idx) => (
+                  <div key={url} className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`Foto ekzistuese ${idx + 1}`}
+                      className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeExistingPhoto(idx)}
+                      className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {data.photoPreviewUrls.length > 0 && (
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {data.photoPreviewUrls.map((url, idx) => (
@@ -790,28 +911,40 @@ export default function CertificateForm({ technician }: Props) {
             )}
 
             <div className="border-t pt-4 mt-2 space-y-3">
-              <button
-                onClick={() => save("draft")}
-                disabled={saving}
-                className="btn-secondary w-full flex items-center justify-center gap-2"
-              >
-                {saving ? "⟳ Duke ruajtur..." : "💾 Ruaj si Draft"}
-              </button>
-              {data.client_email && (
+              {isEdit ? (
                 <button
-                  onClick={() => save("sent")}
+                  onClick={() => save(data.status)}
                   disabled={saving}
                   className="btn-primary w-full flex items-center justify-center gap-2"
                 >
-                  {saving
-                    ? "⟳ Duke dërguar..."
-                    : "📧 Ruaj & Dërgo Email te Klienti"}
+                  {saving ? "⟳ Duke ruajtur..." : "💾 Ruaj Ndryshimet"}
                 </button>
-              )}
-              {!data.client_email && (
-                <p className="text-xs text-gray-400 text-center">
-                  Shto email-in e klientit për ta dërguar direkt
-                </p>
+              ) : (
+                <>
+                  <button
+                    onClick={() => save("draft")}
+                    disabled={saving}
+                    className="btn-secondary w-full flex items-center justify-center gap-2"
+                  >
+                    {saving ? "⟳ Duke ruajtur..." : "💾 Ruaj si Draft"}
+                  </button>
+                  {data.client_email && (
+                    <button
+                      onClick={() => save("sent")}
+                      disabled={saving}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      {saving
+                        ? "⟳ Duke dërguar..."
+                        : "📧 Ruaj & Dërgo Email te Klienti"}
+                    </button>
+                  )}
+                  {!data.client_email && (
+                    <p className="text-xs text-gray-400 text-center">
+                      Shto email-in e klientit për ta dërguar direkt
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>

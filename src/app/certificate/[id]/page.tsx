@@ -17,5 +17,12 @@ export default async function CertificatePage({ params }: { params: Promise<{ id
   const { data: { user } } = await supabase.auth.getUser()
   const isOwner = user?.id === cert.technician_id
 
-  return <CertificateDetail cert={cert} isOwner={isOwner} />
+  let isAdmin = false
+  if (user) {
+    const { data: tech } = await supabase
+      .from('technicians').select('role').eq('id', user.id).single()
+    isAdmin = tech?.role === 'admin'
+  }
+
+  return <CertificateDetail cert={cert} isOwner={isOwner} isAdmin={isAdmin} />
 }
